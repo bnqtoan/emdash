@@ -28,6 +28,7 @@ export const CURRENT_PLUGIN_CAPABILITIES = [
 	"hooks.email-transport:register",
 	"hooks.email-events:register",
 	"hooks.page-fragments:register",
+	"hooks.page-access:register",
 ] as const;
 
 /**

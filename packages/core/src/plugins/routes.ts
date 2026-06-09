@@ -26,6 +26,8 @@ export interface RouteMeta {
 export interface RouteResult<T = unknown> {
 	success: boolean;
 	data?: T;
+	/** Raw `Response` from a handler that serves non-JSON content (HTML/redirect). */
+	response?: Response;
 	error?: {
 		code: string;
 		message: string;
@@ -107,6 +109,12 @@ export class PluginRouteHandler {
 		// Execute handler
 		try {
 			const result = await route.handler(routeContext);
+			// A handler may return a raw `Response` to serve non-JSON content
+			// (e.g. an HTML page or a redirect). Carry it through verbatim so
+			// the route layer can return it as-is rather than JSON-wrapping it.
+			if (result instanceof Response) {
+				return { success: true, response: result, status: result.status };
+			}
 			return {
 				success: true,
 				data: result,

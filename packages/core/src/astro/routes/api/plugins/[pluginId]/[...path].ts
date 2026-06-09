@@ -81,6 +81,12 @@ const handleRequest: APIRoute = async ({ params, request, locals }) => {
 		return apiError(code, message, status);
 	}
 
+	// A handler that returned a raw `Response` (HTML page / redirect) is served
+	// verbatim — not JSON-wrapped.
+	if ((result as { response?: Response }).response instanceof Response) {
+		return (result as { response: Response }).response;
+	}
+
 	return apiSuccess(result.data);
 };
 
