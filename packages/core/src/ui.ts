@@ -72,4 +72,5 @@ export {
 	EmDashHead,
 	EmDashBodyStart,
 	EmDashBodyEnd,
+	EmDashGate,
 } from "./components/index.js";

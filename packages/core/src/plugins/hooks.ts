@@ -52,6 +52,9 @@ import type {
 	PageFragmentEvent,
 	PageFragmentHandler,
 	PageFragmentContribution,
+	PageAccessEvent,
+	PageAccessHandler,
+	PageAccessVerdict,
 } from "./types.js";
 
 // Hook name type for v2
@@ -77,7 +80,8 @@ type HookNameV2 =
 	| "comment:afterCreate"
 	| "comment:afterModerate"
 	| "page:metadata"
-	| "page:fragments";
+	| "page:fragments"
+	| "page:access";
 
 /**
  * Map from hook name to handler type — used for type-safe hook retrieval
@@ -105,6 +109,7 @@ interface HookHandlerMap {
 	"comment:afterModerate": CommentAfterModerateHandler;
 	"page:metadata": PageMetadataHandler;
 	"page:fragments": PageFragmentHandler;
+	"page:access": PageAccessHandler;
 }
 
 /**
@@ -232,6 +237,7 @@ export class HookPipeline {
 			this.registerPluginHook(plugin, "comment:afterModerate");
 			this.registerPluginHook(plugin, "page:metadata");
 			this.registerPluginHook(plugin, "page:fragments");
+			this.registerPluginHook(plugin, "page:access");
 		}
 
 		// Sort hooks by priority and dependencies
@@ -274,6 +280,9 @@ export class HookPipeline {
 		["comment:afterModerate", "users:read"],
 		// Page fragments — can inject arbitrary scripts into every public page
 		["page:fragments", "hooks.page-fragments:register"],
+		// Page access — decides whether a visitor may see page content, so it
+		// reads visitor identity/claims and gates content visibility.
+		["page:access", "hooks.page-access:register"],
 	]);
 
 	/**
@@ -1140,6 +1149,47 @@ export class HookPipeline {
 			} catch (error) {
 				console.error(
 					`[page:fragments] Plugin "${hook.pluginId}" error:`,
+					error instanceof Error ? error.message : error,
+				);
+			}
+		}
+
+		return results;
+	}
+
+	/**
+	 * Run page:access hooks. Only trusted plugins should be registered for
+	 * this hook (gated by `hooks.page-access:register`). Returns each
+	 * plugin's verdict in priority order; the caller resolves them (the
+	 * convention is "first block wins"). Errors are logged, not propagated —
+	 * a crashing gate plugin must not silently expose gated content, so a
+	 * thrown handler is treated as "no verdict" and the caller's default
+	 * (typically allow, matching today's no-hook behaviour) applies. Gate
+	 * plugins should therefore fail closed inside their own handler if that
+	 * matters to them.
+	 */
+	async runPageAccess(
+		event: PageAccessEvent,
+	): Promise<Array<{ pluginId: string; verdict: PageAccessVerdict }>> {
+		const hooks = this.getTypedHooks("page:access");
+		const results: Array<{ pluginId: string; verdict: PageAccessVerdict }> = [];
+
+		for (const hook of hooks) {
+			const { handler } = hook;
+			const ctx = this.getContext(hook.pluginId);
+
+			try {
+				const result = await this.executeWithTimeout(
+					() => Promise.resolve(handler(event, ctx)),
+					hook.timeout,
+				);
+
+				if (result != null) {
+					results.push({ pluginId: hook.pluginId, verdict: result });
+				}
+			} catch (error) {
+				console.error(
+					`[page:access] Plugin "${hook.pluginId}" error:`,
 					error instanceof Error ? error.message : error,
 				);
 			}

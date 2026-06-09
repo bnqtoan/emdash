@@ -1,0 +1,89 @@
+---
+/**
+ * Content render-gate for the page:access hook.
+ *
+ * Parallel to `<EmDashHead>` / `<EmDashBodyStart>` / `<EmDashBodyEnd>`: a
+ * sanctioned, one-component theme wrap that surfaces the resolved
+ * `page:access` verdict. The plugin owns the *decision* (paywall,
+ * members-only, A/B, personalization); this component owns the *swap*.
+ *
+ * Behaviour, decided server-side so the body is NEVER emitted for a blocked
+ * visitor (no flash-of-content):
+ *   - allow (or no gate plugin registered) → render the default slot (body)
+ *   - block → render the `teaser` slot instead of the body
+ *
+ * The resolved verdict is exposed on `Astro.locals.emdashAccess` so the theme
+ * can render the plugin-supplied teaser blocks and read `reason`/`blockedBy`.
+ *
+ * Redirects are deliberately NOT performed here: a leaf `.astro` component
+ * cannot reliably short-circuit its parent page's response. When the verdict
+ * carries a `redirect`, the body is still suppressed (so nothing leaks) and
+ * the URL is surfaced on `Astro.locals.emdashAccess.redirect` — the theme's
+ * page frontmatter performs the actual `Astro.redirect(...)` before rendering.
+ *
+ * Usage:
+ * ```astro
+ * ---
+ * import { EmDashGate } from "emdash/ui";
+ * // In the page frontmatter, honour a redirect the gate may have set on a
+ * // prior pass, or evaluate it up front:
+ * const access = await Astro.locals.emdash?.collectPageAccess?.(page, reader);
+ * if (access?.allow === false && access.redirect) return Astro.redirect(access.redirect);
+ * ---
+ * <EmDashGate page={page} visitor={reader}>
+ *   <PortableText value={post.data.content} />
+ *   <Fragment slot="teaser">
+ *     <PortableText value={Astro.locals.emdashAccess?.teaser} />
+ *     <a href="/subscribe">Subscribe to keep reading</a>
+ *   </Fragment>
+ * </EmDashGate>
+ * ```
+ *
+ * `visitor` is the reader identity the host resolves before rendering;
+ * `null`/omitted is anonymous (the default). Gate plugins read whatever the
+ * host attaches.
+ */
+import type { PublicPageContext, PageAccessVerdict, PageAccessVisitor } from "../plugins/types.js";
+
+/**
+ * Subset of the runtime this component calls. Mirrors the structural-check
+ * pattern in `getPageRuntime` (page/index.ts) without depending on it, so the
+ * gate stays additive to core.
+ */
+interface PageAccessRuntime {
+	collectPageAccess: (
+		page: PublicPageContext,
+		visitor: PageAccessVisitor | null,
+	) => Promise<(PageAccessVerdict & { blockedBy?: string }) | undefined>;
+}
+
+function getAccessRuntime(locals: Record<string, unknown>): PageAccessRuntime | undefined {
+	const emdash = locals.emdash;
+	if (emdash && typeof emdash === "object" && "collectPageAccess" in emdash) {
+		// eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- structural check confirms the method
+		return emdash as PageAccessRuntime;
+	}
+	return undefined;
+}
+
+interface Props {
+	page: PublicPageContext;
+	/** Reader identity resolved by the host; `null`/omitted = anonymous. */
+	visitor?: PageAccessVisitor | null;
+}
+
+const { page, visitor = null } = Astro.props;
+const locals = Astro.locals as Record<string, unknown>;
+const runtime = getAccessRuntime(locals);
+
+// No runtime or no gate plugin registered → verdict is undefined → allow.
+const verdict = runtime ? await runtime.collectPageAccess(page, visitor) : undefined;
+const blocked = verdict?.allow === false;
+
+// Expose the verdict to the theme so the `teaser` slot can render the
+// plugin-supplied teaser blocks (and read reason/blockedBy/redirect for
+// messaging or a page-level redirect).
+locals.emdashAccess = verdict;
+---
+
+{blocked ? <slot name="teaser" /> : <slot />}
