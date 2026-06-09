@@ -951,6 +951,58 @@ export type PageFragmentHandler = (
 	| null
 	| Promise<PageFragmentContribution | PageFragmentContribution[] | null>;
 
+// ── page:access (trusted-only) ─────────────────────────────────
+//
+// Lets a plugin decide whether the current visitor may see the full
+// content of a page, and (when blocked) what to render instead — a
+// teaser, a redirect, or just a block. Generic enough for paywalls,
+// member-only content, A/B gating, and per-segment personalization.
+//
+// The runtime collects verdicts; the theme reads the resolved verdict
+// (via <EmDashGate /> or the page-contributions API) and renders full
+// content, the teaser, or performs the redirect. The hook never sees or
+// rewrites the body itself — the theme owns rendering.
+
+/**
+ * Identity of the current visitor, as resolved by the host (theme/middleware)
+ * before page rendering. `null` for anonymous visitors. The shape is
+ * intentionally open: hosts map their own member/customer session onto it,
+ * and gate plugins read whatever fields they put there.
+ */
+export interface PageAccessVisitor {
+	id: string | null;
+	email?: string | null;
+	/** Free-form claims the host attaches (tiers, status, segment, …). */
+	[key: string]: unknown;
+}
+
+export interface PageAccessEvent {
+	page: PublicPageContext;
+	visitor: PageAccessVisitor | null;
+}
+
+/**
+ * A single plugin's verdict for a page. `allow: true` permits the full
+ * content. `allow: false` blocks it; the optional `teaser`/`redirect`
+ * tell the theme how to handle the block.
+ */
+export type PageAccessVerdict =
+	| { allow: true }
+	| {
+			allow: false;
+			/** Machine-readable reason, e.g. "paywall" | "members-only". */
+			reason?: string;
+			/** Optional teaser blocks the theme may render in place of the body. */
+			teaser?: unknown;
+			/** Optional URL the theme should redirect the visitor to. */
+			redirect?: string;
+	  };
+
+export type PageAccessHandler = (
+	event: PageAccessEvent,
+	ctx: PluginContext,
+) => PageAccessVerdict | null | Promise<PageAccessVerdict | null>;
+
 /**
  * Plugin hooks definition
  */
@@ -992,6 +1044,7 @@ export interface PluginHooks {
 	// Public page hooks
 	"page:metadata"?: HookConfig<PageMetadataHandler> | PageMetadataHandler;
 	"page:fragments"?: HookConfig<PageFragmentHandler> | PageFragmentHandler;
+	"page:access"?: HookConfig<PageAccessHandler> | PageAccessHandler;
 }
 
 /**
@@ -1301,6 +1354,7 @@ export interface ResolvedPluginHooks {
 	"comment:afterModerate"?: ResolvedHook<CommentAfterModerateHandler>;
 	"page:metadata"?: ResolvedHook<PageMetadataHandler>;
 	"page:fragments"?: ResolvedHook<PageFragmentHandler>;
+	"page:access"?: ResolvedHook<PageAccessHandler>;
 }
 
 // =============================================================================
