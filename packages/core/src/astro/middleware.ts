@@ -401,6 +401,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
 							handlePublicPluginApiRoute,
 							collectPageMetadata: runtime.collectPageMetadata.bind(runtime),
 							collectPageFragments: runtime.collectPageFragments.bind(runtime),
+							collectPageAccess: runtime.collectPageAccess.bind(runtime),
 							getPublicMediaUrl: createPublicMediaUrlResolver(runtime.storage),
 						} as EmDashHandlers;
 					} catch {
@@ -484,6 +485,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
 				// Attach to locals for route handlers
 				locals.emdash = {
+					// Page access render-gate (EmDashGate / page:access hook)
+					collectPageAccess: runtime.collectPageAccess.bind(runtime),
+
 					// Content handlers
 					handleContentList: runtime.handleContentList.bind(runtime),
 					handleContentGet: runtime.handleContentGet.bind(runtime),

@@ -463,6 +463,17 @@ export interface EmDashHandlers {
 		page: import("../plugins/types.js").PublicPageContext,
 	) => Promise<import("../plugins/types.js").PageFragmentContribution[]>;
 
+	// Page access render-gate (for EmDashGate / the page:access hook). Resolves
+	// the per-visitor verdict so the theme can swap the body for a teaser.
+	// Optional: only meaningful when a gate plugin is registered.
+	collectPageAccess?: (
+		page: import("../plugins/types.js").PublicPageContext,
+		visitor?: import("../plugins/types.js").PageAccessVisitor | null,
+	) => Promise<
+		| (import("../plugins/types.js").PageAccessVerdict & { blockedBy?: string })
+		| undefined
+	>;
+
 	/**
 	 * Lazy search index health check. Search routes call this before
 	 * querying so a crash-corrupted index gets repaired on first use
