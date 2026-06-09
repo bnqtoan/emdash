@@ -104,3 +104,4 @@ export const emdashComponents = {
 export { default as EmDashHead } from "./EmDashHead.astro";
 export { default as EmDashBodyStart } from "./EmDashBodyStart.astro";
 export { default as EmDashBodyEnd } from "./EmDashBodyEnd.astro";
+export { default as EmDashGate } from "./EmDashGate.astro";

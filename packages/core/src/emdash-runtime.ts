@@ -38,6 +38,8 @@ import type {
 	PublicPageContext,
 	PageMetadataContribution,
 	PageFragmentContribution,
+	PageAccessVerdict,
+	PageAccessVisitor,
 } from "./plugins/types.js";
 import type { FieldType } from "./schema/types.js";
 import { hashString } from "./utils/hash.js";
@@ -59,7 +61,15 @@ function parseStringArray(raw: string | null | undefined): string[] {
 	return parsed.filter((v): v is string => typeof v === "string");
 }
 
-/** Combined result from a single-pass page contribution collection */
+/**
+ * Combined result from a single-pass page contribution collection.
+ *
+ * The page:access verdict is intentionally NOT part of this shape: it is
+ * visitor-dependent, while metadata/fragments are not, and the head/body-start
+ * components populate this (visitor-less) cache first. The verdict has its own
+ * accessor, `collectPageAccess(page, visitor)`, which the theme consumes via
+ * `<EmDashGate />`. See `pageAccessCache`.
+ */
 interface PageContributions {
 	metadata: PageMetadataContribution[];
 	fragments: PageFragmentContribution[];
@@ -145,6 +155,7 @@ import {
 	type Storage,
 } from "./index.js";
 import { getDb } from "./loader.js";
+import { resolvePageAccess } from "./page/access.js";
 import { CronExecutor, type InvokeCronHookFn } from "./plugins/cron.js";
 import { definePlugin } from "./plugins/define-plugin.js";
 import { DEV_CONSOLE_EMAIL_PLUGIN_ID, devConsoleEmailDeliver } from "./plugins/email-console.js";
@@ -3093,8 +3104,26 @@ export class EmDashRuntime {
 	private pageContributionCache = new WeakMap<PublicPageContext, Promise<PageContributions>>();
 
 	/**
+	 * Cache for the resolved page:access verdict. Keyed on the page context
+	 * object (request-scoped); the value caches per *visitor* identity so the
+	 * verdict is computed once per (page, visitor) even when both EmDashGate
+	 * and a sibling component query it. The visitor is NOT folded into the
+	 * page-contribution cache above: metadata/fragments are visitor-independent
+	 * and EmDashHead/EmDashBodyStart populate that cache first (with no
+	 * visitor), so baking the verdict there would pin it to "anonymous" before
+	 * EmDashGate runs with the real reader.
+	 */
+	private pageAccessCache = new WeakMap<
+		PublicPageContext,
+		Map<PageAccessVisitor | null, Promise<(PageAccessVerdict & { blockedBy?: string }) | undefined>>
+	>();
+
+	/**
 	 * Collect all page contributions (metadata + fragments) in a single pass.
-	 * Results are cached by page context object identity.
+	 * Results are cached by page context object identity. The page:access
+	 * verdict is visitor-dependent and lives on its own path
+	 * (`collectPageAccess`), so it is intentionally not included here — see
+	 * `pageAccessCache` for why.
 	 */
 	async collectPageContributions(page: PublicPageContext): Promise<PageContributions> {
 		const cached = this.pageContributionCache.get(page);
@@ -3145,6 +3174,41 @@ export class EmDashRuntime {
 		}
 
 		return { metadata, fragments };
+	}
+
+	/**
+	 * Resolve the page:access verdict for the current visitor.
+	 *
+	 * Runs the trusted `page:access` gate hooks and folds them with
+	 * `resolvePageAccess` (first block wins). Returns `undefined` when no gate
+	 * plugin is registered — today's behaviour, full body for everyone, and no
+	 * extra query. The hook is trusted-only (gated by
+	 * `hooks.page-access:register`), so sandboxed plugins never participate.
+	 *
+	 * `visitor` is the reader identity the host (theme/middleware) resolves
+	 * before rendering — `null`/anonymous is the default; C-05c populates it.
+	 * Cached per (page, visitor) so EmDashGate and any sibling reader share one
+	 * evaluation.
+	 */
+	async collectPageAccess(
+		page: PublicPageContext,
+		visitor: PageAccessVisitor | null = null,
+	): Promise<(PageAccessVerdict & { blockedBy?: string }) | undefined> {
+		let byVisitor = this.pageAccessCache.get(page);
+		if (!byVisitor) {
+			byVisitor = new Map();
+			this.pageAccessCache.set(page, byVisitor);
+		}
+		const cached = byVisitor.get(visitor);
+		if (cached) return cached;
+
+		const promise = (async () => {
+			if (!this.hooks.hasHooks("page:access")) return undefined;
+			const verdicts = await this.hooks.runPageAccess({ page, visitor });
+			return resolvePageAccess(verdicts);
+		})();
+		byVisitor.set(visitor, promise);
+		return promise;
 	}
 
 	/**
