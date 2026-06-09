@@ -140,6 +140,7 @@ function defineNativePlugin<TStorage extends PluginStorageConfig>(
 		"hooks.email-transport:register",
 		"hooks.email-events:register",
 		"hooks.page-fragments:register",
+		"hooks.page-access:register",
 		// Deprecated aliases
 		"network:fetch",
 		"network:fetch:any",
